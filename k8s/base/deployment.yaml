@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: editorial-workflow
+  labels:
+    app: editorial-workflow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: editorial-workflow
+  template:
+    metadata:
+      labels:
+        app: editorial-workflow
+    spec:
+      containers:
+        - name: editorial-workflow
+          image: editorial-workflow:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: editorial-workflow-secrets
+            - configMapRef:
+                name: editorial-workflow-config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3

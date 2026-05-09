@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: editorial-workflow-config
+data:
+  NODE_ENV: "production"
+  OJS_JOURNAL_PATH: "index"
+  NEXT_TELEMETRY_DISABLED: "1"
