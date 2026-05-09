@@ -6,8 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Daily backup at 2:00 AM UTC
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'  # Daily backup at 2:00 AM UTC
   workflow_dispatch:
     inputs:
       action:
@@ -23,7 +22,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ============================================
@@ -49,7 +47,7 @@ jobs:
         run: bun run build
 
   # ============================================
-  # BUILD JOB
+  # BUILD DOCKER IMAGE
   # ============================================
   build:
     needs: test
@@ -98,122 +96,70 @@ jobs:
   # ============================================
   # DEPLOY TO VPS
   # ============================================
-  deploy-vps:
+  deploy:
     needs: build
     runs-on: ubuntu-latest
     if: |
       (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
-    environment: production
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check if VPS deployment is configured
-        id: check-secrets
+      - name: Check VPS secrets
+        id: check
         run: |
           if [ -n "${{ secrets.VPS_HOST }}" ] && [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
-            echo "configured=true" >> $GITHUB_OUTPUT
+            echo "ready=true" >> $GITHUB_OUTPUT
           else
-            echo "configured=false" >> $GITHUB_OUTPUT
-            echo "::warning::VPS deployment skipped - secrets not configured"
+            echo "ready=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy to VPS
-        if: steps.check-secrets.outputs.configured == 'true'
+        if: steps.check.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
-            cd /opt/editorial-workflow
-
+            cd /opt/editorial-workflow || exit 1
             echo "📦 Pulling latest changes..."
             git pull origin main
-
-            echo "🔨 Building and restarting services..."
+            echo "🔨 Building and restarting..."
             docker compose pull
             docker compose up -d --build app
-
-            echo "🧹 Cleaning up old images..."
             docker image prune -f
-
-            echo "✅ Deployment complete!"
+            echo "✅ Done!"
             docker compose ps
 
-      - name: Notify Slack on Success
-        if: steps.check-secrets.outputs.configured == 'true' && success() && secrets.SLACK_WEBHOOK_URL
-        uses: slackapi/slack-github-action@v2.1.0
-        with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {
-              "text": "✅ Deployment Successful",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "✅ *Editorial Workflow deployed successfully*\n\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*By:* ${{ github.actor }}"
-                  }
-                }
-              ]
-            }
-
-      - name: Notify Discord on Success
-        if: steps.check-secrets.outputs.configured == 'true' && success() && secrets.DISCORD_WEBHOOK_URL
+      - name: Notify Success (Slack)
+        if: steps.check.outputs.ready == 'true' && success() && secrets.SLACK_WEBHOOK_URL != ''
         run: |
-          curl -H "Content-Type: application/json" \
-            -d '{
-              "embeds": [{
-                "title": "✅ Deployment Successful",
-                "description": "Editorial Workflow deployed successfully",
-                "color": 5763719,
-                "fields": [
-                  {"name": "Branch", "value": "${{ github.ref_name }}", "inline": true},
-                  {"name": "Commit", "value": "`${{ github.sha }}`", "inline": true},
-                  {"name": "By", "value": "${{ github.actor }}", "inline": true}
-                ]
-              }]
-            }' \
-            ${{ secrets.DISCORD_WEBHOOK_URL }}
+          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H 'Content-type: application/json' \
+            -d '{"text":"✅ Editorial Workflow deployed - ${{ github.sha }}"}' || true
 
-      - name: Notify on Failure
-        if: failure() && (secrets.SLACK_WEBHOOK_URL || secrets.DISCORD_WEBHOOK_URL)
+      - name: Notify Success (Discord)
+        if: steps.check.outputs.ready == 'true' && success() && secrets.DISCORD_WEBHOOK_URL != ''
         run: |
-          # Slack notification
-          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
-            curl -X POST -H 'Content-type: application/json' \
-              --data '{"text":"❌ Deployment Failed for Editorial Workflow\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}"}' \
-              ${{ secrets.SLACK_WEBHOOK_URL }}
-          fi
+          curl -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H 'Content-type: application/json' \
+            -d '{"content":"✅ Editorial Workflow deployed - ${{ github.sha }}"}' || true
 
-          # Discord notification
-          if [ -n "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
-            curl -H "Content-Type: application/json" \
-              -d '{"embeds": [{"title": "❌ Deployment Failed", "description": "Editorial Workflow deployment failed", "color": 15158332}]}' \
-              ${{ secrets.DISCORD_WEBHOOK_URL }}
-          fi
-
-      - name: Deployment skipped info
-        if: steps.check-secrets.outputs.configured == 'false'
+      - name: Show setup instructions
+        if: steps.check.outputs.ready == 'false'
         run: |
-          echo "ℹ️ VPS deployment skipped because secrets are not configured."
+          echo "⚠️ VPS deployment skipped - secrets not configured"
           echo ""
-          echo "To enable VPS deployment, add these secrets to your repository:"
-          echo "  - VPS_HOST: Your VPS IP or hostname"
-          echo "  - VPS_USER: SSH username (e.g., root)"
-          echo "  - VPS_SSH_KEY: SSH private key"
-          echo "  - VPS_PORT: SSH port (optional, default: 22)"
-          echo ""
-          echo "For notifications, add:"
-          echo "  - SLACK_WEBHOOK_URL: Slack incoming webhook URL"
-          echo "  - DISCORD_WEBHOOK_URL: Discord webhook URL"
+          echo "Add these secrets in GitHub Settings > Secrets > Actions:"
+          echo "  VPS_HOST     - Your server IP"
+          echo "  VPS_USER     - SSH user (default: root)"
+          echo "  VPS_SSH_KEY  - SSH private key"
+          echo "  VPS_PORT     - SSH port (default: 22)"
 
   # ============================================
-  # DAILY BACKUP JOB
+  # DAILY BACKUP
   # ============================================
   backup:
     runs-on: ubuntu-latest
@@ -221,115 +167,54 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'backup')
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Check if backup is configured
-        id: check-backup
+      - name: Check secrets
+        id: check
         run: |
           if [ -n "${{ secrets.VPS_HOST }}" ] && [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
-            echo "configured=true" >> $GITHUB_OUTPUT
+            echo "ready=true" >> $GITHUB_OUTPUT
           else
-            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Backup skipped - VPS secrets not configured"
           fi
 
-      - name: Run backup on VPS
-        if: steps.check-backup.outputs.configured == 'true'
+      - name: Run backup
+        if: steps.check.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             cd /opt/editorial-workflow
-
-            BACKUP_DIR="backups/$(date +%Y%m%d_%H%M%S)"
-            mkdir -p "$BACKUP_DIR"
-
-            echo "📦 Creating backup in $BACKUP_DIR..."
-
-            # Backup Redis
-            docker compose exec -T redis redis-cli BGSAVE
+            BACKUP="backups/$(date +%Y%m%d_%H%M%S)"
+            mkdir -p "$BACKUP"
+            docker compose exec -T redis redis-cli BGSAVE 2>/dev/null || true
             sleep 2
-            docker cp editorial-redis:/data/dump.rdb "$BACKUP_DIR/redis-dump.rdb" 2>/dev/null || true
-
-            # Backup environment
-            cp .env "$BACKUP_DIR/.env.backup" 2>/dev/null || true
-
-            # Backup Grafana dashboards
-            docker cp editorial-grafana:/var/lib/grafana "$BACKUP_DIR/grafana-data" 2>/dev/null || true
-
-            # Compress backup
-            tar -czf "$BACKUP_DIR.tar.gz" -C "$(dirname $BACKUP_DIR)" "$(basename $BACKUP_DIR)"
-            rm -rf "$BACKUP_DIR"
-
-            # Keep only last 7 backups
-            ls -t backups/*.tar.gz 2>/dev/null | tail -n +8 | xargs -r rm
-
-            echo "✅ Backup completed: $BACKUP_DIR.tar.gz"
-            ls -lh backups/*.tar.gz 2>/dev/null | tail -5
-
-      - name: Notify backup completion
-        if: steps.check-backup.outputs.configured == 'true' && secrets.SLACK_WEBHOOK_URL
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data '{"text":"📦 Daily backup completed for Editorial Workflow"}' \
-            ${{ secrets.SLACK_WEBHOOK_URL }} || true
+            docker cp editorial-redis:/data/dump.rdb "$BACKUP/redis.rdb" 2>/dev/null || true
+            cp .env "$BACKUP/.env" 2>/dev/null || true
+            tar -czf "$BACKUP.tar.gz" -C backups "$(basename $BACKUP)"
+            rm -rf "$BACKUP"
+            ls -t backups/*.tar.gz | tail -n +8 | xargs -r rm
+            echo "✅ Backup: $BACKUP.tar.gz"
 
   # ============================================
-  # RESTART SERVICES JOB
+  # RESTART SERVICES
   # ============================================
   restart:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'restart'
     steps:
-      - name: Restart services on VPS
-        if: secrets.VPS_HOST && secrets.VPS_SSH_KEY
+      - name: Restart services
+        if: secrets.VPS_HOST != '' && secrets.VPS_SSH_KEY != ''
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             cd /opt/editorial-workflow
-            echo "🔄 Restarting all services..."
             docker compose restart
-            echo "✅ Services restarted!"
             docker compose ps
-
-  # ============================================
-  # DEPLOY TO KUBERNETES (Optional)
-  # ============================================
-  deploy-kubernetes:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check if Kubernetes is configured
-        id: check-k8s
-        run: |
-          if [ -n "${{ secrets.KUBE_CONFIG_PRODUCTION }}" ]; then
-            echo "configured=true" >> $GITHUB_OUTPUT
-          else
-            echo "configured=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set up kubectl
-        if: steps.check-k8s.outputs.configured == 'true'
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubectl
-        if: steps.check-k8s.outputs.configured == 'true'
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
-
-      - name: Deploy to Kubernetes
-        if: steps.check-k8s.outputs.configured == 'true'
-        run: |
-          kubectl apply -k k8s/overlays/production
-          kubectl rollout status deployment/prod-editorial-workflow -n production --timeout=300s
+            echo "✅ Services restarted!"
