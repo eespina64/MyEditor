@@ -1,10 +1,12 @@
 version: '3.8'
 
 services:
+  # Main Application
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: editorial-app
     ports:
       - "3000:3000"
     environment:
@@ -12,24 +14,112 @@ services:
       - OJS_BASE_URL=${OJS_BASE_URL:-}
       - OJS_API_KEY=${OJS_API_KEY:-}
       - OJS_JOURNAL_PATH=${OJS_JOURNAL_PATH:-index}
+      - OJS_WEBHOOK_URL=${OJS_WEBHOOK_URL:-}
+      - OJS_WEBHOOK_SECRET=${OJS_WEBHOOK_SECRET:-}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      - REDIS_URL=redis://redis:6379
+      - METRICS_TOKEN=${METRICS_TOKEN:-editorial-metrics-2024}
+    depends_on:
+      - redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - editorial-network
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=3000"
+      - "prometheus.path=/api/metrics"
 
-  # Optional: Redis for caching
+  # Redis Cache
   redis:
     image: redis:7-alpine
+    container_name: editorial-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - editorial-network
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: editorial-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    restart: unless-stopped
+    networks:
+      - editorial-network
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: editorial-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-editorial-admin-2024}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3001}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - editorial-network
+
+  # Nginx Reverse Proxy (optional, for production)
+  nginx:
+    image: nginx:alpine
+    container_name: editorial-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - app
+      - grafana
     restart: unless-stopped
     profiles:
-      - with-cache
+      - production
+    networks:
+      - editorial-network
 
 volumes:
   redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  editorial-network:
+    driver: bridge
