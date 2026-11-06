@@ -34,7 +34,7 @@ En los ejemplos, sustituya `203.0.113.10` por la IP de su VPS y `editorial.su-do
 
 El despliegue nuevo solo existe en la rama `claude/project-deployment-b7g6ep` hasta que se fusione.
 
-1. Abra el pull request en https://github.com/eespina64/MyEditor/pulls.
+1. Abra el pull request #2: https://github.com/eespina64/MyEditor/pull/2 (de `claude/project-deployment-b7g6ep` a `main`).
 2. Espere a que las comprobaciones terminen y revise que `test` y `build` están en verde.
 3. Pulse **Merge pull request** y después **Confirm merge**.
 
@@ -57,7 +57,7 @@ git show origin/main:scripts/upgrade.sh > /tmp/editia-upgrade.sh
 bash /tmp/editia-upgrade.sh --dir /opt/editorial-workflow --branch main
 ```
 
-No use `git pull`: falla si `setup-ssl.sh` ya modificó `nginx/nginx.conf`, mientras que `upgrade.sh` conserva esa versión local.
+No use `git pull`: se detiene si `nginx/nginx.conf` tiene cambios locales (los de `setup-ssl.sh`) y la versión nueva también lo cambia, mientras que `upgrade.sh` conserva siempre la versión local.
 
 ### 2.1 Entrar e instalar
 
@@ -120,7 +120,11 @@ scripts/upgrade.sh --status
 ```
 
 `--status` debe mostrar el commit desplegado y `Contenedor editorial-app: healthy`.
+Justo después de arrancar puede aparecer `starting` o `curl` puede no responder: espere un minuto y repita.
 «Imagen de vuelta atrás: no disponible» es normal en la primera instalación; aparece después de la primera actualización.
+
+Desde este momento los puertos 3000, 3001, 9090 y 6379 (Redis sin contraseña) están abiertos a Internet.
+Haga ya el apartado 7.1 para cerrarlos, aunque el resto del paso 7 quede para el final.
 
 ---
 
@@ -136,7 +140,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/editia_deploy -N "" -C "github-actions-editia"
 ```
 
 Se crean dos archivos: `~/.ssh/editia_deploy` (privada, irá a GitHub) y `~/.ssh/editia_deploy.pub` (pública, irá al VPS).
-La clave privada no lleva contraseña porque GitHub Actions no puede escribirla; protéjala como un secreto.
+La clave privada va sin contraseña porque el flujo de despliegue no pasa ninguna `passphrase` a la acción de SSH; protéjala como un secreto.
 
 ### 3.2 Autorizarla en el VPS
 
@@ -144,10 +148,11 @@ La clave privada no lleva contraseña porque GitHub Actions no puede escribirla;
 ssh-copy-id -i ~/.ssh/editia_deploy.pub root@203.0.113.10
 ```
 
-**Comprobación:** esta orden debe entrar sin pedir contraseña y mostrar el estado:
+**Comprobación:** esta orden debe entrar sin pedir contraseña y mostrar el estado.
+`IdentitiesOnly=yes` obliga a usar solo esa clave, para que la prueba no pase gracias a su clave personal:
 
 ```bash
-ssh -i ~/.ssh/editia_deploy root@203.0.113.10 'cd /opt/editorial-workflow && scripts/upgrade.sh --status'
+ssh -o IdentitiesOnly=yes -i ~/.ssh/editia_deploy root@203.0.113.10 'cd /opt/editorial-workflow && scripts/upgrade.sh --status'
 ```
 
 ### 3.3 Obtener la huella del servidor
@@ -218,11 +223,13 @@ Si el servidor ya tiene la última versión de `main`, el registro termina así:
 editorial-app Up … (healthy)
 ```
 
-Si había una versión nueva, verá la copia de seguridad, la construcción y al final:
+Si había una versión nueva, verá la copia de seguridad, la construcción y hacia el final:
 
 ```
 [upgrade] Servicio sano (contenedor: healthy, commit <nuevo>)
 [upgrade] Actualización completada: <nuevo> en servicio
+[upgrade] Para volver a <anterior>: scripts/upgrade.sh --rollback
+editorial-app Up … (healthy)
 ```
 
 Las dos salidas se han reproducido el 2026-11-06 ejecutando el mismo script del trabajo `deploy` contra una instalación de prueba.
@@ -230,8 +237,11 @@ Las dos salidas se han reproducido el 2026-11-06 ejecutando el mismo script del 
 **Comprobación en el VPS:**
 
 ```bash
-cd /opt/editorial-workflow && scripts/upgrade.sh --status && tail -3 .upgrade/history.log
+cd /opt/editorial-workflow && scripts/upgrade.sh --status
+tail -3 .upgrade/history.log 2>/dev/null || echo "Sin actualizaciones registradas todavía"
 ```
+
+`history.log` solo se crea con la primera actualización real; si el servidor ya estaba al día, es normal que no exista.
 
 A partir de aquí, cada push o fusión en `main` despliega solo.
 Si la versión nueva no arranca, `upgrade.sh` vuelve a la anterior y el trabajo `deploy` termina en rojo.
@@ -276,16 +286,24 @@ git clone https://github.com/eespina64/MyEditor.git && cd MyEditor
 ls -l .agents/skills | head -3        # deben ser enlaces (->) a ../../.claude/skills/…
 ```
 
-Registre la clave del servidor y compruebe que coincide con la del VPS:
+Use su clave SSH personal para esto, no la de GitHub Actions.
+Si en el apartado 2.1 entró con contraseña, autorice antes su clave personal en el VPS:
 
 ```bash
-ssh-keyscan -t ecdsa,ed25519 203.0.113.10 >> ~/.ssh/known_hosts
-ssh-keygen -l -F 203.0.113.10                         # compárela con 3.3
+ssh-copy-id root@203.0.113.10
+```
+
+Registre la clave Ed25519 del servidor (la que usa OpenSSH en su equipo) y compruebe que coincide con la del VPS:
+
+```bash
+ssh-keyscan -t ed25519 203.0.113.10 >> ~/.ssh/known_hosts
+ssh-keygen -l -F 203.0.113.10                         # huella SHA256:… de su equipo
+ssh root@203.0.113.10 'ssh-keygen -l -f /etc/ssh/ssh_host_ed25519_key.pub'   # debe ser la misma
 ssh -o BatchMode=yes root@203.0.113.10 'echo ok'      # debe responder "ok" sin preguntar nada
 export EDITIA_SSH=root@203.0.113.10
 ```
 
-Use su clave SSH personal para esto, no la de GitHub Actions.
+Esta huella Ed25519 es distinta de la de `VPS_FINGERPRINT` (apartado 3.3), y es normal: su equipo y GitHub Actions negocian tipos de clave diferentes.
 
 ### 6.4 Prueba 1: la clave funciona (sin tocar el servidor)
 
@@ -318,7 +336,7 @@ dsh --profile headless --permission-mode workspace-write \
 ```
 
 Correcto: termina con la tabla de la skill (versión antes y después, código de salida, copia de seguridad, salud, logs).
-La frase «Autorizo la actualización en …» es obligatoria: sin ella la skill se detiene antes de actualizar.
+Hace falta una autorización explícita que nombre el servidor, como «Autorizo la actualización en …»; sin ella la skill se detiene antes de actualizar.
 
 Estas tres pruebas son la primera ejecución con la API real de DeepSeek; anote lo que devuelvan.
 Hasta ahora `dsh` solo se ha probado con un servidor que imita esa API (manual, sección 5.1).
@@ -374,11 +392,12 @@ ssh -L 3001:localhost:3001 -L 9090:localhost:9090 root@203.0.113.10
 ```bash
 cd /opt/editorial-workflow
 scripts/setup-ssl.sh editorial.su-dominio.edu
-docker compose --profile production up -d
 ```
 
+El script pide un correo para Let's Encrypt y al terminar arranca nginx con `docker compose --profile production up -d`.
+
 La renovación automática del certificado tiene un fallo conocido.
-Anote en su calendario revisarlo cada 60 días con el procedimiento de la sección 6 del manual.
+Compruebe la caducidad cada 60 días (manual, sección 4.7) y, si ha caducado, renuévelo con el procedimiento de la sección 6 del manual.
 
 ### 7.3 Copias de la base de datos
 
@@ -398,7 +417,7 @@ Las actualizaciones desde GitHub Actions no tienen esa variable y no copian la b
 
 - [ ] Pull request fusionado; la ejecución de `main` en **Actions** está en verde.
 - [ ] `curl -s http://localhost:3000/api/health` en el VPS devuelve `healthy` y el commit.
-- [ ] `ssh -i ~/.ssh/editia_deploy root@<ip> 'echo ok'` funciona sin contraseña.
+- [ ] `ssh -o IdentitiesOnly=yes -i ~/.ssh/editia_deploy root@<ip> 'echo ok'` funciona sin contraseña.
 - [ ] Los secretos `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `VPS_SSH_KEY` y `VPS_FINGERPRINT` existen en GitHub.
 - [ ] El despliegue manual (paso 5) termina en verde con «Actualización completada» o «Ya está en la última versión».
 - [ ] `METRICS_TOKEN` y `GRAFANA_PASSWORD` son propios.
@@ -415,6 +434,7 @@ Las actualizaciones desde GitHub Actions no tienen esa variable y no copian la b
 | `deploy` en verde pero «VPS deployment skipped» | Falta `VPS_HOST` o `VPS_SSH_KEY` | Paso 4 |
 | `ssh: host key fingerprint mismatch` | La huella es de otro tipo de clave o el servidor cambió | Repita 3.3 con el bucle `ecdsa rsa ed25519` y actualice `VPS_FINGERPRINT` |
 | `ssh: handshake failed: ssh: unable to authenticate` | La clave privada está incompleta o la pública no está en el VPS | Vuelva a copiar la privada completa (3.1, 4) y a ejecutar `ssh-copy-id` (3.2) |
+| `Permission denied (publickey)` al usar `dsh` o `ssh -o BatchMode=yes` | Su clave personal no está autorizada en el VPS | `ssh-copy-id root@<ip>` (6.3) |
 | `dial tcp …: i/o timeout` | Puerto SSH cerrado o IP incorrecta | Revise `VPS_HOST`, `VPS_PORT` y el cortafuegos del proveedor |
 | `[upgrade] ERROR: Docker no responde` | Docker parado en el VPS | `systemctl start docker` |
 | `[upgrade] ERROR: Hay cambios locales en archivos versionados` | Alguien editó un archivo del repositorio en el servidor | `git diff`; los ajustes de puertos van en `docker-compose.override.yml` |
@@ -434,4 +454,7 @@ Comprobadas el 2026-11-06.
 - Con una huella vacía, la conexión no verifica el servidor: `appleboy/easyssh-proxy` v1.5.0, `easyssh.go` (`ssh.InsecureIgnoreHostKey()` salvo que haya `Fingerprint`), usada por `drone-ssh` v1.8.1: https://github.com/appleboy/easyssh-proxy
 - Orden de negociación de claves del servidor (ECDSA, RSA, Ed25519): `golang.org/x/crypto` v0.36.0, `ssh/common.go`, `supportedHostKeyAlgos`: https://github.com/golang/crypto
 - DeepSeek Harness: paquete `@deepseek-ai/dsh` (https://www.npmjs.com/package/@deepseek-ai/dsh) y repositorio https://github.com/deepseek-ai/deepseek-harness (credenciales del modo headless en `packages/bundle/headless/README.md`).
+- OpenSSH, `ssh_config(5)`: `IdentitiesOnly` (sin él se prueban también las claves del agente) y `HostKeyAlgorithms` (Ed25519 antes que ECDSA en el cliente de su equipo): https://github.com/openssh/openssh-portable
+- Modos de archivo de `scripts/*.sh` en Git: todos `100755`, así que el `chmod +x` de `setup-vps.sh` no crea cambios locales (`git ls-files -s scripts/`).
+- Revisada con el subagente `evidence-reviewer` del proyecto (unas 75 afirmaciones). Quedan sin comprobar contra documentación oficial los nombres de botones de la web de GitHub y las páginas de manual de ufw y nmap, porque docs.github.com, git.launchpad.net y nmap.org no eran accesibles desde el entorno de trabajo.
 - Pruebas propias con Docker 29.8.2 y Docker Compose v5.6: script del trabajo `deploy` contra una instalación de prueba (dos ejecuciones: actualización y «ya al día») y `docker-compose.override.yml` con `!override` en el servicio `app`.

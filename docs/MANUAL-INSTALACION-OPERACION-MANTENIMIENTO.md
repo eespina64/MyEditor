@@ -145,6 +145,7 @@ En GitHub, **Settings → Secrets and variables → Actions**, cree:
 | `VPS_SSH_KEY` | Clave privada SSH con acceso al VPS |
 | `VPS_USER` | Usuario SSH (por defecto `root`) |
 | `VPS_PORT` | Puerto SSH (por defecto `22`) |
+| `VPS_FINGERPRINT` | Huella `SHA256:…` de la clave del servidor; sin ella no se verifica la identidad del VPS (cómo obtenerla: guía de puesta en marcha, apartado 3.3) |
 | `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` | Opcionales, para avisos |
 
 Si falta `VPS_HOST` o `VPS_SSH_KEY`, el trabajo `deploy` termina en verde pero no despliega; su registro muestra «VPS deployment skipped - secrets not configured».
@@ -217,6 +218,7 @@ Eso solo sirve si además cierra el puerto 3000, que `docker-compose.yml` public
 - **Métricas**: `curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3000/api/metrics`.
 - **Prometheus**: `http://<servidor>:9090`. Reglas de alerta en `monitoring/alerts.yml`.
 - **Grafana**: `http://<servidor>:3001`, usuario `GRAFANA_USER`. Panel «Editorial Workflow Dashboard» (uid `editorial-workflow-main`).
+- Con los puertos cerrados según la guía de puesta en marcha (apartado 7.1), ábralos por túnel SSH: `ssh -L 3001:localhost:3001 -L 9090:localhost:9090 root@<servidor>` y `http://localhost:3001`.
 
 Prometheus no envía el token al leer `/api/metrics`, y en Docker el token siempre está definido, así que el objetivo aparece siempre caído y la alerta `ApplicationDown` salta.
 Los objetivos `redis` y `cadvisor` tampoco funcionan (sección 7, punto 4).
@@ -477,7 +479,8 @@ Anthropic advierte que no da soporte a Claude Code con modelos que no sean Claud
 | Vuelta atrás automática en cada actualización | La versión nueva no arranca o no responde a tiempo | `docker compose logs --tail 200 app`; si solo es lenta, `HEALTH_TIMEOUT=300 scripts/upgrade.sh` |
 | Salida 4 | La versión anterior tampoco queda sana | `docker compose logs app`; revise `.env`, disco (`df -h`) y memoria (`free -m`); `GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build app` |
 | `deploy` de GitHub en verde pero el servidor no cambia | Faltan `VPS_HOST` o `VPS_SSH_KEY` | Sección 2.7 |
-| `deploy` falla al conectar | Clave SSH o puerto | Pruebe `ssh -i <clave> -p <puerto> <usuario>@<host>` desde otra máquina |
+| `deploy` falla al conectar | Clave SSH o puerto | Pruebe `ssh -o IdentitiesOnly=yes -i <clave> -p <puerto> <usuario>@<host>` desde otra máquina |
+| `deploy` falla con `ssh: host key fingerprint mismatch` | `VPS_FINGERPRINT` es de otro tipo de clave o el servidor cambió de clave | Guía de puesta en marcha, apartado 3.3; si el servidor cambió sin motivo, investíguelo antes de actualizar el secreto |
 | La pestaña OJS dice «La integración con OJS no está configurada» | Faltan `OJS_BASE_URL` u `OJS_API_KEY` | Sección 2.3 y `docker compose up -d app` |
 | Cambié `NEXT_PUBLIC_*` y no se nota | Se incrustan al construir | `scripts/upgrade.sh --force` |
 | Prometheus marca la app como caída | Prometheus no envía `METRICS_TOKEN` | Sección 7, punto 4 |
