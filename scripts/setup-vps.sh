@@ -123,8 +123,9 @@ chmod +x scripts/*.sh
 
 # Create .env file
 if [ ! -f ".env" ]; then
-    cp .env.example .env
-    echo -e "${YELLOW}Archivo .env creado. Por favor, configúrelo.${NC}"
+    cp config/env.template .env
+    chmod 600 .env
+    echo -e "${YELLOW}Archivo .env creado desde config/env.template. Por favor, configúrelo.${NC}"
 fi
 
 echo ""

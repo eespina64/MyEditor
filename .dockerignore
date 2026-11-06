@@ -1,0 +1,13 @@
+# Contexto de construcción de la imagen de EDITIA.
+# .env NO se excluye: las variables NEXT_PUBLIC_* se incrustan al construir.
+.git
+node_modules
+.next
+backups
+.upgrade
+nginx/ssl
+nginx/logs
+drafts
+sources
+published
+*.pem
