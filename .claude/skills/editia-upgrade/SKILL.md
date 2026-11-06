@@ -31,7 +31,9 @@ Los agentes preparan, deciden con evidencia y verifican.
 3. **Migraciones.** Si hay migraciones nuevas, no actualices hasta que el usuario confirme que están aplicadas o que se aplicarán después (ver el manual, sección de migraciones).
 4. **Pide autorización** mostrando: destino, versión actual → nueva, resumen de cambios, migraciones y si habrá copia de la base de datos (`SUPABASE_DB_URL` exportada en el servidor).
 5. **Actualiza** (solo el agente principal, tras la autorización): `ssh ... 'cd /opt/editorial-workflow && scripts/upgrade.sh --branch <rama>'`. Guarda el código de salida y las últimas 40 líneas.
-   - 0: actualizado. 1: falló y el servicio quedó en la versión anterior. 3: otra actualización en curso. 4: la vuelta atrás tampoco quedó sana; avisa de inmediato, es una incidencia.
+   - 0: actualizado. 1: falló y el servicio quedó en la versión anterior (o no se tocó). 2: uso incorrecto. 3: otra actualización en curso.
+   - 4: la vuelta atrás tampoco quedó sana o no había imagen de vuelta atrás; avisa de inmediato, es una incidencia.
+   - Cualquier otro código: falló `docker` o `git` antes de tocar el servicio; informa del mensaje.
 6. **Lanza el subagente `verifier`** (solo lectura): `scripts/upgrade.sh --status`, `docker compose ps`, `docker compose logs --tail 100 app` buscando errores, y la URL pública `https://<dominio>/api/health` si se conoce. Comprueba que `version` coincide con el commit nuevo.
 7. **Informa** con esta tabla y los comandos exactos usados:
 

@@ -51,7 +51,7 @@ backup_local() {
 
     # Cleanup old backups
     echo -e "${BLUE}Limpiando backups antiguos...${NC}"
-    ls -t "$BACKUP_DIR"/*.tar.gz 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)) | xargs -r rm
+    ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)) | xargs -r rm
 
     # Show backup info
     BACKUP_SIZE=$(du -h "$BACKUP_PATH.tar.gz" | cut -f1)

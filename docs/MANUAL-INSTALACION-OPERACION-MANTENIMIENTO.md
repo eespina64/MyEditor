@@ -33,7 +33,7 @@ Supabase y OJS son servicios externos; la aplicación funciona en modo demostrac
 | `nginx` (`editorial-nginx`) | VPS, solo con el perfil `production` | 80, 443 | Configuración en `nginx/nginx.conf` |
 | Supabase | Externo | — | Autenticación y esquema en `supabase/migrations/` |
 | OJS | Externo | — | API REST de la revista |
-| Netlify (proyecto `editia`) | Externo | — | Construye una vista previa en cada pull request |
+| Netlify (proyecto `editia`) | Externo | — | Construyó la vista previa del pull request #1 (comentario de Netlify en ese PR) |
 
 El despliegue automático funciona así.
 Cada push a `main` ejecuta `.github/workflows/ci-cd.yaml`: `test`, `build` (imagen en `ghcr.io/eespina64/myeditor`) y `deploy`.
@@ -51,7 +51,7 @@ La imagen de `ghcr.io` no se usa en el VPS.
 | CPU | 2 vCPU | 4 vCPU |
 | RAM | 4 GB | 8 GB |
 | Disco | 40 GB SSD | 80 GB SSD |
-| Sistema | Ubuntu 20.04+, Debian 11+ | Ubuntu 22.04 LTS |
+| Sistema | Ubuntu 20.04+, Debian 11+, CentOS 8+ | Ubuntu 22.04 LTS |
 
 Fuente: `docs/GUIA-VPS.md`, sección de requisitos.
 Cada actualización construye una imagen nueva y conserva la anterior para poder volver atrás, así que deje al menos 2 GB libres; `upgrade.sh --check` avisa si hay menos.
@@ -66,10 +66,12 @@ less setup-vps.sh          # revíselo antes de ejecutarlo
 bash setup-vps.sh
 ```
 
-El script actualiza el sistema, instala Docker y Docker Compose, abre el cortafuegos (ufw o firewalld) y clona el repositorio en `/opt/editorial-workflow`.
+El script actualiza el sistema, instala `curl`, `wget`, `git`, Docker y Docker Compose, configura el cortafuegos (ufw o firewalld) y clona el repositorio en `/opt/editorial-workflow`.
 Al final crea `.env` a partir de `config/env.template` con permisos `600`.
 
-Instale también `curl` (lo usa la comprobación de salud) y, si va a copiar la base de datos, el cliente de PostgreSQL:
+El cortafuegos que configura abre también los puertos 3000, 3001 y 9090 al exterior; ciérrelos si no los necesita (sección 7, punto 5).
+
+Si va a copiar la base de datos, instale el cliente de PostgreSQL:
 
 ```bash
 apt-get install -y curl postgresql-client
@@ -78,7 +80,7 @@ apt-get install -y curl postgresql-client
 ### 2.3 Configurar `.env`
 
 Edite `/opt/editorial-workflow/.env`.
-Todas las variables están documentadas en `config/env.template`; la tabla completa está en la sección 8.1.
+Las variables principales están en `config/env.template`; la tabla completa está en la sección 8.1.
 
 Mínimos para producción:
 
@@ -142,14 +144,14 @@ En GitHub, **Settings → Secrets and variables → Actions**, cree:
 | `VPS_PORT` | Puerto SSH (por defecto `22`) |
 | `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` | Opcionales, para avisos |
 
-Sin `VPS_HOST` y `VPS_SSH_KEY`, el trabajo `deploy` termina en verde pero no despliega; su registro muestra «VPS deployment skipped - secrets not configured».
+Si falta `VPS_HOST` o `VPS_SSH_KEY`, el trabajo `deploy` termina en verde pero no despliega; su registro muestra «VPS deployment skipped - secrets not configured».
 Para desplegar a mano desde GitHub: **Actions → CI/CD Pipeline → Run workflow**, con `action: deploy`.
 
 ### 2.8 Netlify
 
-El repositorio está conectado al proyecto de Netlify `editia`, que construye una vista previa por pull request (`deploy-preview-<n>--editia.netlify.app`).
-La configuración está en `netlify.toml`.
-Netlify y el VPS se despliegan por separado y en paralelo; el VPS es la instalación con Docker, Redis y monitorización.
+El repositorio está conectado al proyecto de Netlify `editia`: el bot de Netlify publicó la vista previa del pull request #1 en `deploy-preview-1--editia.netlify.app`.
+La configuración de construcción está en `netlify.toml`; el resto (sitio de producción, vistas previas) se gestiona en el panel de Netlify.
+Netlify y el VPS se despliegan por separado (inferido: no se ha comprobado el sitio de producción de Netlify); el VPS es la instalación con Docker, Redis y monitorización.
 
 ### 2.9 Entorno de desarrollo
 
@@ -194,7 +196,7 @@ El inicio de sesión es un selector de usuarios de demostración.
 | Método y ruta | Uso | Autenticación |
 |---|---|---|
 | `GET /api/health` | Salud y commit desplegado | Ninguna |
-| `GET /api/metrics` (`?format=json`) | Métricas Prometheus | `Authorization: Bearer <METRICS_TOKEN>` si está definido |
+| `GET /api/metrics` (`?format=json`) | Métricas Prometheus | `Authorization: Bearer <METRICS_TOKEN>`; en Docker siempre, porque `docker-compose.yml` pone `editorial-metrics-2024` si `.env` lo deja vacío |
 | `GET /api/ojs/status` | Prueba la conexión con OJS | Ninguna |
 | `GET /api/ojs/stats` | Envíos por estado | Ninguna |
 | `GET /api/ojs/submissions` | Lista envíos (`count`, `offset`, `status`) | Ninguna |
@@ -203,16 +205,17 @@ El inicio de sesión es un selector de usuarios de demostración.
 | `GET /api/webhooks/ojs?events=true` | Últimos 20 eventos recibidos (en memoria) | Ninguna |
 
 No hay autenticación en las rutas de OJS.
-Si el servidor es público, limite el acceso a `/api/ojs/*` en nginx o con el cortafuegos.
+Si el servidor es público, limite el acceso a `/api/ojs/*` en nginx.
+Eso solo sirve si además cierra el puerto 3000, que `docker-compose.yml` publica directamente, o lo publica solo en local (`"127.0.0.1:3000:3000"`).
 
 ### 3.4 Monitorización
 
 - **Salud**: `GET /api/health` responde siempre `healthy` mientras el proceso vive; no comprueba OJS ni Supabase.
 - **Métricas**: `curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3000/api/metrics`.
 - **Prometheus**: `http://<servidor>:9090`. Reglas de alerta en `monitoring/alerts.yml`.
-- **Grafana**: `http://<servidor>:3001`, usuario `GRAFANA_USER`. Panel «editorial-workflow-main».
+- **Grafana**: `http://<servidor>:3001`, usuario `GRAFANA_USER`. Panel «Editorial Workflow Dashboard» (uid `editorial-workflow-main`).
 
-Prometheus no envía el token al leer `/api/metrics`, así que con `METRICS_TOKEN` definido el objetivo aparece caído y la alerta `ApplicationDown` salta.
+Prometheus no envía el token al leer `/api/metrics`, y en Docker el token siempre está definido, así que el objetivo aparece siempre caído y la alerta `ApplicationDown` salta.
 Los objetivos `redis` y `cadvisor` tampoco funcionan (sección 7, punto 4).
 
 ### 3.5 Webhook de OJS
@@ -232,7 +235,7 @@ Sustituye a `git pull` + `docker compose up -d --build` y a `scripts/deploy-vps.
 
 Qué hace, en orden:
 
-1. Impide dos actualizaciones a la vez (`flock`).
+1. Impide dos actualizaciones o vueltas atrás a la vez (`flock`). Si `flock` no está instalado, solo avisa. `--check` y `--status` no toman el bloqueo.
 2. Descarga la rama (`git fetch`) y compara la versión instalada con la nueva.
 3. Se detiene si hay cambios locales en archivos versionados, salvo `nginx/nginx.conf`, que conserva.
 4. Avisa si la nueva versión trae migraciones en `supabase/migrations/`.
@@ -259,12 +262,14 @@ Variables: `HEALTH_URL`, `HEALTH_TIMEOUT`, `KEEP_BACKUPS` (10 por defecto) y `SU
 | Código de salida | Significado | Qué hacer |
 |---|---|---|
 | 0 | Actualizado, o ya estaba al día | Nada |
-| 1 | Falló; el servicio sigue en la versión anterior | Revise el mensaje y `docker compose logs app` |
+| 1 | Falló; el servicio sigue en la versión anterior (o no se llegó a tocar) | Revise el mensaje y `docker compose logs app` |
 | 2 | Uso incorrecto o instalación no encontrada | Revise las opciones y `--dir` |
 | 3 | Otra actualización en curso | Espere y repita |
-| 4 | La versión anterior tampoco quedó sana | Incidencia: sección 6 |
+| 4 | La versión anterior tampoco quedó sana, o no había imagen `editia-app:rollback` | Incidencia: sección 6 |
+| Otro | Falló un comando de `docker` o `git` antes de tocar el servicio | Revise Docker (`docker info`) y el mensaje anterior |
 
-Cada resultado queda en `.upgrade/history.log`.
+En `.upgrade/history.log` quedan las actualizaciones completadas, los fallos posteriores a cambiar el código y las vueltas atrás.
+Los rechazos previos (ya al día, cambios locales, bloqueo, `pg_dump` o `git fetch` fallidos) solo aparecen en la salida.
 El despliegue de GitHub Actions ejecuta la versión de `upgrade.sh` de la rama desplegada, no la copia que haya en el servidor.
 
 Comportamiento comprobado el 2026-11-06 en una instalación simulada con Docker:
@@ -277,11 +282,14 @@ Comportamiento comprobado el 2026-11-06 en una instalación simulada con Docker:
 | Versión nueva cuya imagen no se construye | Salida 1; contenedor en servicio sin reiniciar; código restaurado |
 | Cambio local en un archivo versionado | Actualización rechazada antes de tocar nada |
 | Segunda actualización simultánea | Rechazada con salida 3 |
+| `pg_dump` que falla con `SUPABASE_DB_URL` definida | Salida 1 antes de tocar el código; sin restos de la copia sin comprimir |
+| Rama inexistente o `git fetch` fallido | Salida 1 con mensaje claro |
 
 ### 4.2 Copias de seguridad
 
 Cada actualización guarda en `backups/upgrade-<fecha>-<commit>.tar.gz`: `.env` (como `env`), `nginx/` con los certificados, el commit anterior (`git-sha`) y los cambios locales (`local-changes.diff`).
-Se conservan las 10 más recientes.
+`upgrade.sh` conserva las 10 más recientes de este tipo (`KEEP_BACKUPS`).
+`backup.sh local` (archivos `backup_*.tar.gz`) y la copia diaria de GitHub Actions (archivos `<fecha>_<hora>.tar.gz`) conservan cada una sus 7 más recientes y no borran las de los demás.
 
 **Los datos de Supabase no se copian salvo que lo pida.**
 Exporte la cadena de conexión solo en la sesión de mantenimiento y `upgrade.sh` añadirá `supabase.dump`:
@@ -304,18 +312,26 @@ rsync -a /opt/editorial-workflow/backups/ backup@otro-servidor:/copias/editia/
 
 ### 4.3 Restaurar
 
-Restaurar configuración y certificados desde una copia de actualización:
+Restaurar desde una copia de actualización, en este orden (el código primero, porque `git reset` sobrescribe `nginx/nginx.conf`):
 
 ```bash
 cd /opt/editorial-workflow
 tar -xzf backups/upgrade-<fecha>-<commit>.tar.gz -C /tmp
-cp /tmp/upgrade-<fecha>-<commit>/env .env && chmod 600 .env
-cp -a /tmp/upgrade-<fecha>-<commit>/nginx/. nginx/
-docker compose up -d
-```
+B=/tmp/upgrade-<fecha>-<commit>
 
-Volver al código de esa copia: `scripts/upgrade.sh --rollback` si es la versión anterior inmediata.
-Si es más antigua: `git reset --hard <commit>` y `GIT_SHA=<commit> docker compose up -d --build app`.
+# 1. Código: la versión anterior inmediata...
+scripts/upgrade.sh --rollback
+# ...o una más antigua (el commit está en $B/git-sha):
+#   git reset --hard "$(cat $B/git-sha)" && GIT_SHA="$(cat $B/git-sha)" docker compose up -d --build app
+
+# 2. Configuración y certificados
+cp "$B/env" .env && chmod 600 .env
+cp -a "$B/nginx/." nginx/
+
+# 3. Aplicar
+docker compose up -d app
+docker compose --profile production up -d && docker compose restart nginx   # si usa nginx
+```
 
 Restaurar la base de datos de Supabase (sobrescribe los objetos existentes):
 
@@ -346,7 +362,8 @@ docker image prune -f        # solo imágenes sin etiqueta
 docker builder prune -f      # caché de construcción
 ```
 
-No use `docker volume prune` ni `scripts/deploy-vps.sh cleanup`, que lo ejecuta: en versiones de Docker anteriores a la 23 borra también los volúmenes con nombre que no estén en uso, como los de Grafana y Prometheus con sus contenedores parados.
+No use `scripts/deploy-vps.sh cleanup`: ejecuta `docker system prune -f`, que elimina los contenedores parados, y después `docker volume prune -f`.
+Con Docker 29.8 (comprobado) `volume prune` solo borra volúmenes anónimos salvo que se añada `--all`; con otras versiones, compruebe `docker volume prune --help` antes de usarlo, porque los datos de Grafana y Prometheus están en volúmenes con nombre.
 
 ### 4.6 Rotación de secretos
 
@@ -354,7 +371,7 @@ No use `docker volume prune` ni `scripts/deploy-vps.sh cleanup`, que lo ejecuta:
 |---|---|---|
 | `OJS_API_KEY` | OJS → perfil del usuario → API | Editar `.env`, `docker compose up -d app` |
 | `METRICS_TOKEN` | `.env` | `docker compose up -d app` y configurar el mismo token en Prometheus |
-| `GRAFANA_PASSWORD` | Grafana → perfil | La variable solo se aplica al crear Grafana |
+| `GRAFANA_PASSWORD` | Grafana → perfil del administrador | Actualice también `.env` para que coincidan (no se ha comprobado si Grafana vuelve a aplicar la variable en cada arranque) |
 | `NEXT_PUBLIC_SUPABASE_*` | Supabase → API | `scripts/upgrade.sh --force` (se incrustan al construir) |
 | `VPS_SSH_KEY` | GitHub → Secrets y `~/.ssh/authorized_keys` del VPS | Probar un despliegue manual |
 
@@ -377,7 +394,7 @@ La skill `editia-upgrade` (`.claude/skills/editia-upgrade/SKILL.md`) organiza la
 
 | Agente | Herramientas | Tarea |
 |---|---|---|
-| Principal | Todas | Coordina, pide autorización y es el único que ejecuta `upgrade.sh` |
+| Principal | Todas | Coordina, pide autorización y es el único que actualiza o vuelve atrás (`upgrade.sh` sin `--check` ni `--status`) |
 | `preflight` | Solo lectura | `upgrade.sh --check` por SSH; devuelve `GO` o `NO-GO` |
 | `release-notes` | Solo lectura | Resume los commits y señala migraciones y variables nuevas |
 | `verifier` | Solo lectura | `--status`, logs y salud pública después de actualizar |
@@ -388,7 +405,7 @@ La skill no actualiza sin una autorización explícita que nombre el servidor, y
 ### 5.1 DeepSeek Harness (`dsh`)
 
 DeepSeek Harness es el agente de programación de DeepSeek (paquete npm `@deepseek-ai/dsh`, licencia MIT).
-Está en versión preliminar: la última publicada el 2026-11-06 es `0.2.2-rc.1`.
+Está en versión preliminar: el 2026-11-06 la etiqueta `latest` de npm apunta a `0.2.2-rc.1`.
 
 Instalación en el equipo del operador, no en el VPS:
 
@@ -405,19 +422,19 @@ No guarde esa clave en el `.env` del proyecto.
 Qué lee `dsh` de este repositorio sin configuración adicional:
 
 - `CLAUDE.md` (y `AGENTS.md` si existiera) como instrucciones del proyecto.
-- Las skills de `.agents/skills/`, que son enlaces a `.claude/skills/`: `editia-upgrade`, `write-draft` y las seis de Obsidian.
+- Las skills de `.agents/skills/`, que son enlaces a `.claude/skills/`: `editia-upgrade`, `write-draft`, `obsidian-markdown`, `obsidian-bases`, `obsidian-cli`, `json-canvas`, `defuddle` y `knap`.
 - Las herramientas de varios agentes `subagent`, `subagent_fork`, `send_message`, `list_agents` e `interrupt_agent`.
 
-En Windows, los enlaces de `.agents/skills/` necesitan `git config core.symlinks true` y el modo de desarrollador activado antes de clonar.
-Si no, `dsh` no verá las skills.
+Los elementos de `.agents/skills/` son enlaces simbólicos de Git.
+En Windows, compruebe después de clonar que son carpetas enlazadas y no archivos de texto con una ruta; si son archivos, active los enlaces simbólicos en Git (`core.symlinks`) y vuelva a clonar (no comprobado en Windows).
 
 Uso desde la raíz del repositorio, con la clave del VPS ya en `~/.ssh/known_hosts`:
 
 ```bash
 export EDITIA_SSH=root@203.0.113.10
 
-# Solo comprobación previa (no cambia nada)
-dsh --profile headless --permission-mode read-only \
+# Solo comprobación previa (no cambia nada en el servidor; localmente solo hace git fetch)
+dsh --profile headless --permission-mode workspace-write \
   "Usa la skill editia-upgrade hasta el paso 2: comprobación previa y notas de versión para $EDITIA_SSH."
 
 # Actualización completa; la autorización va en la propia tarea porque headless no admite preguntas
@@ -426,10 +443,12 @@ dsh --profile headless --permission-mode workspace-write \
 ```
 
 Para trabajar de forma interactiva, use `dsh web`, añada la carpeta del repositorio como espacio de trabajo y pida «usa la skill editia-upgrade».
-En la interfaz web, **Use Agent Teams** en el menú del modelo añade un tablero de tareas compartido entre los agentes; es opcional.
+Los subagentes de la skill usan las herramientas `subagent` y `subagent_fork`, que el perfil `web` y el `headless` traen de serie.
+El tablero de tareas compartido de DeepSeek Harness («Agent Teams») no viene en el perfil `web` de la versión `0.2.2-rc.1` (comprobado con `dsh --profile web --dump-config`) y la skill no lo necesita.
 
-`--permission-mode` solo limita qué archivos locales puede modificar el agente; no limita la red, así que `ssh` funciona en los tres modos.
-`read-only` basta para la comprobación previa.
+`--permission-mode` elige un preset: `read-only` no permite modificar archivos, `workspace-write` permite modificar el repositorio y `danger-full-access` quita los límites y las preguntas.
+Según la documentación de DeepSeek Harness, estos modos solo regulan escrituras de archivos y no la red, pero no se ha comprobado que `ssh` funcione en cada modo.
+`read-only` no sirve para la skill, porque el subagente `release-notes` ejecuta `git fetch`, que escribe en `.git/`.
 
 Qué se ha comprobado el 2026-11-06 con `dsh 0.2.2-rc.1` y Node 24.22.2, usando un servidor de prueba que imita la API de DeepSeek:
 `dsh` cargó `CLAUDE.md`, ofreció las 8 skills del proyecto y las herramientas de subagentes, y usó el modelo `deepseek-flash` con esfuerzo `high`.
@@ -456,12 +475,13 @@ Anthropic advierte que no da soporte a Claude Code con modelos que no sean Claud
 | Salida 4 | La versión anterior tampoco queda sana | `docker compose logs app`; revise `.env`, disco (`df -h`) y memoria (`free -m`); `GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build app` |
 | `deploy` de GitHub en verde pero el servidor no cambia | Faltan `VPS_HOST` o `VPS_SSH_KEY` | Sección 2.7 |
 | `deploy` falla al conectar | Clave SSH o puerto | Pruebe `ssh -i <clave> -p <puerto> <usuario>@<host>` desde otra máquina |
-| La pestaña OJS dice «no configurado» | Faltan `OJS_BASE_URL` u `OJS_API_KEY` | Sección 2.3 y `docker compose up -d app` |
+| La pestaña OJS dice «La integración con OJS no está configurada» | Faltan `OJS_BASE_URL` u `OJS_API_KEY` | Sección 2.3 y `docker compose up -d app` |
 | Cambié `NEXT_PUBLIC_*` y no se nota | Se incrustan al construir | `scripts/upgrade.sh --force` |
 | Prometheus marca la app como caída | Prometheus no envía `METRICS_TOKEN` | Sección 7, punto 4 |
-| El navegador avisa de certificado caducado | La renovación automática falla | `docker compose stop nginx && certbot renew && docker compose start nginx` |
+| El navegador avisa de certificado caducado | La renovación automática falla | `docker compose stop nginx && certbot renew && cp /etc/letsencrypt/live/<dominio>/{fullchain,privkey}.pem nginx/ssl/ && docker compose --profile production start nginx` |
 | Los artículos «desaparecen» | Los datos viven en el navegador | Sección 3.2 |
 | `dsh` no muestra las skills | Enlaces de `.agents/skills` rotos (Windows) o se lanzó fuera del repositorio | Sección 5.1 |
+| La skill `editia-upgrade` falla en `git fetch` | `dsh` lanzado con `--permission-mode read-only` | Use `workspace-write` |
 | `dsh` falla con `MISSING_CREDENTIAL` | Falta `DEEPSEEK_API_KEY` | `export DEEPSEEK_API_KEY=…` |
 
 ---
@@ -479,30 +499,31 @@ No están corregidos en esta versión salvo donde se indica.
    - El objetivo `redis` no tiene exportador y `cadvisor` no existe en `docker-compose.yml`.
    - Las métricas de artículos son valores fijos.
 5. **Exposición de puertos.**
-   - Redis (6379) se publica sin contraseña y Prometheus tiene la API de administración activada.
-   - Los puertos publicados por Docker no pasan por ufw.
-   - Cierre 6379, 9090 y 3001 en el cortafuegos del proveedor o quite esos `ports:` de `docker-compose.yml`.
+   - `docker-compose.yml` publica 3000 (app), 3001 (Grafana), 6379 (Redis) y 9090 (Prometheus) en todas las interfaces, y `setup-vps.sh` abre 3000, 3001 y 9090 en el cortafuegos.
+   - Redis se publica sin contraseña y Prometheus tiene la API de administración activada.
+   - Las reglas de ufw pueden no aplicarse a los puertos que publica Docker; compruebe desde otra máquina con `nmap -p 3000,3001,6379,9090 <ip-del-vps>`.
+   - Cierre esos puertos en el cortafuegos del proveedor, o publíquelos solo en local (`"127.0.0.1:<puerto>:<puerto>"`) y acceda por nginx o por un túnel SSH.
 6. **Renovación de certificados.** La tarea programada usa `certbot renew` en modo standalone mientras nginx ocupa el puerto 80, así que falla (`scripts/setup-ssl.sh`).
 7. **`backup.sh` y la copia diaria.**
    - La copia diaria de GitHub Actions usa nombres de archivo distintos de los que espera `backup.sh restore`, que entonces no restaura nada.
-   - La restauración de Redis no tiene efecto con AOF activado.
+   - La restauración de Redis copia `dump.rdb`, pero Redis arranca con `--appendonly yes`; no se ha comprobado que la copia restaurada se cargue. Redis no guarda datos de la app (punto 10), así que no es crítico.
    - La restauración de Grafana copia a una ruta equivocada.
    - Use las copias de `upgrade.sh` y `pg_dump` (sección 4.2).
 8. **Migración no idempotente.** `001_initial_schema.sql` falla si se ejecuta dos veces, y `setup-supabase.sh` no se detiene en el primer error.
-9. **`deploy-vps.sh cleanup`** ejecuta `docker volume prune -f`.
+9. **`deploy-vps.sh cleanup`** ejecuta `docker system prune -f` y `docker volume prune -f` (sección 4.5).
 10. **Redis no se usa.** `src/lib/redis.ts` guarda la URL pero usa una caché en memoria del proceso.
 11. **Documentación anterior desactualizada.**
-    - `MANUAL-COMPLETO.md` y `DEPLOYMENT.md` mencionan el perfil `with-cache`, que no existe.
-    - Mencionan las variables `SUPABASE_URL` y `SUPABASE_ANON_KEY`; el código lee `NEXT_PUBLIC_*`.
-    - Mencionan `RESEND_API_KEY`, que no se usa.
-    - Describen webhooks salientes y sincronización automática, que no están conectados.
+    - `MANUAL-COMPLETO.md` y `DEPLOYMENT.md` mencionan el perfil `with-cache`, que no existe, y las variables `SUPABASE_URL` y `SUPABASE_ANON_KEY`; el código lee `NEXT_PUBLIC_*`.
+    - `DEPLOYMENT.md` menciona `RESEND_API_KEY`, que no se usa.
+    - `MANUAL-COMPLETO.md` describe webhooks salientes y sincronización automática, que no están conectados.
 
 Corregido en esta versión:
 
 - `setup-vps.sh` copiaba un `.env.example` que no existía y la instalación se detenía; ahora usa `config/env.template`.
 - El despliegue de GitHub Actions hacía `git pull` sin comprobar errores y borraba la imagen anterior con `docker image prune`. Ahora usa `upgrade.sh`, con vuelta atrás y sin despliegues simultáneos.
-- `/api/health` devolvía siempre `1.0.0`; ahora devuelve el commit desplegado.
+- `/api/health` devolvía siempre `1.0.0` en Docker; ahora devuelve el commit desplegado (fuera de Docker sigue usando la versión de `package.json` o `1.0.0`).
 - El contexto de construcción de Docker incluía `.git` y `backups/` (con copias de `.env`); `.dockerignore` los excluye.
+- La rotación de la copia diaria de GitHub Actions y de `backup.sh local` borraba cualquier `*.tar.gz` de `backups/`, incluidas las copias de `upgrade.sh`; ahora cada una solo rota sus propios archivos.
 
 ---
 
@@ -519,8 +540,12 @@ Corregido en esta versión:
 | `NEXT_PUBLIC_APP_URL` | URL pública | Solo afecta a la información del webhook |
 | `METRICS_TOKEN` | Token de `/api/metrics` | `docker-compose.yml` pone un valor público por defecto |
 | `GRAFANA_USER`, `GRAFANA_PASSWORD`, `GRAFANA_ROOT_URL` | Grafana | Contraseña por defecto publicada |
-| `SUPABASE_DB_URL` | `pg_dump` en `upgrade.sh`, `psql` | La base de datos no se copia |
-| `BACKUP_REMOTE_HOST`, `BACKUP_REMOTE_PATH`, `AWS_S3_BUCKET` | `backup.sh remote` | Sin copia remota |
+| `OJS_WEBHOOK_URL` | Webhooks salientes (`src/lib/webhooks.ts`) | Sin efecto: ese código aún no se usa |
+| `NEXT_PUBLIC_OJS_BASE_URL`, `NEXT_PUBLIC_OJS_JOURNAL_PATH` | Alternativas a `OJS_BASE_URL` y `OJS_JOURNAL_PATH` | Se usan las anteriores |
+| `SUPABASE_DB_URL` (*) | `pg_dump` en `upgrade.sh`, `psql` | La base de datos no se copia |
+| `BACKUP_REMOTE_HOST`, `BACKUP_REMOTE_PATH`, `AWS_S3_BUCKET` (*) | `backup.sh remote` | Sin copia remota |
+
+(*) Los scripts no leen `.env`: estas variables se exportan en la shell (`export SUPABASE_DB_URL='…'`) antes de ejecutar el script.
 | `GIT_SHA` | Commit incrustado en la imagen (lo pone `upgrade.sh`) | `/api/health` devuelve `unknown` |
 | `DEEPSEEK_API_KEY` | `dsh`, en el equipo del operador | `MISSING_CREDENTIAL` |
 | `EDITIA_SSH` | Destino de la skill `editia-upgrade` | La skill lo pregunta |
@@ -557,4 +582,7 @@ Comprobadas el 2026-11-06.
 - DeepSeek, uso de la API de Anthropic (URL base `https://api.deepseek.com/anthropic`); solo vista en resultados de búsqueda, la página no se pudo abrir desde el entorno de trabajo: https://api-docs.deepseek.com/guides/anthropic_api
 - Anthropic, variables de entorno de Claude Code: https://code.claude.com/docs/en/env-vars
 - Anthropic, Claude Code con pasarelas LLM (no se da soporte a modelos que no sean Claude): https://code.claude.com/docs/en/llm-gateway
+- Comprobaciones locales: `docker volume prune --help` en Docker 29.8.2; `dsh --profile web --dump-config` y `dsh --profile headless --dump-config` con `dsh 0.2.2-rc.1`; `npm view @deepseek-ai/dsh dist-tags`.
+- No se pudieron consultar desde el entorno de trabajo, y las afirmaciones que dependían de ellas se han reformulado como no comprobadas: docs.docker.com, grafana.com, redis.io, api-docs.deepseek.com.
+- El manual se revisó con el subagente `evidence-reviewer` del proyecto (unas 215 afirmaciones; las incorrectas se corrigieron y las no resueltas se marcaron).
 - Código de este repositorio, revisado archivo por archivo: `docker-compose.yml`, `Dockerfile`, `scripts/*.sh`, `.github/workflows/ci-cd.yaml`, `src/app/api/**`, `src/lib/**`, `src/store/**`, `supabase/migrations/001_initial_schema.sql`, `monitoring/**`.

@@ -192,8 +192,10 @@ make_backup() {
   if [[ -n "${SUPABASE_DB_URL:-}" ]]; then
     if command -v pg_dump >/dev/null 2>&1; then
       log "Volcando la base de datos de Supabase (pg_dump)"
-      pg_dump --no-owner --no-privileges -Fc "$SUPABASE_DB_URL" > "$dir/supabase.dump" \
-        || die "pg_dump falló; no se continúa sin copia de la base de datos"
+      if ! pg_dump --no-owner --no-privileges -Fc "$SUPABASE_DB_URL" > "$dir/supabase.dump"; then
+        rm -rf "$dir"
+        die "pg_dump falló; no se continúa sin copia de la base de datos (el servicio no se ha tocado)"
+      fi
     else
       warn "SUPABASE_DB_URL está definida pero pg_dump no está instalado: la base de datos NO se copia"
     fi
@@ -233,7 +235,7 @@ show_status() {
 do_check() {
   local old new
   old="$(git rev-parse HEAD)"
-  git fetch -q origin "$BRANCH"
+  git fetch -q origin "$BRANCH" || die "No se pudo descargar origin/$BRANCH (red, credenciales o rama inexistente)"
   new="$(git rev-parse "origin/$BRANCH")"
   show_status
   if [[ "$old" == "$new" ]]; then
@@ -309,7 +311,7 @@ do_upgrade() {
 
   OLD_SHA="$(git rev-parse HEAD)"
   log "Instalación: $APP_DIR — versión actual ${OLD_SHA:0:7}"
-  git fetch -q origin "$BRANCH"
+  git fetch -q origin "$BRANCH" || die "No se pudo descargar origin/$BRANCH (red, credenciales o rama inexistente)"
   NEW_SHA="$(git rev-parse "origin/$BRANCH")"
 
   if [[ "$OLD_SHA" == "$NEW_SHA" && "$FORCE" -eq 0 ]]; then
