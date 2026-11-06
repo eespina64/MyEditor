@@ -45,3 +45,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# servidor: ajustes locales de puertos (ver docs/GUIA-PUESTA-EN-MARCHA.md)
+/docker-compose.override.yml

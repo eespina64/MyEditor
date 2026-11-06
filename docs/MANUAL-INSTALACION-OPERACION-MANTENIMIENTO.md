@@ -44,6 +44,9 @@ La imagen de `ghcr.io` no se usa en el VPS.
 
 ## 2. Instalación
 
+Para una primera puesta en marcha guiada, paso a paso (servidor, clave SSH de despliegue, secretos de GitHub, DeepSeek Harness y endurecimiento), siga [GUIA-PUESTA-EN-MARCHA.md](GUIA-PUESTA-EN-MARCHA.md).
+Esta sección es la referencia.
+
 ### 2.1 Requisitos del servidor
 
 | | Mínimo | Recomendado |

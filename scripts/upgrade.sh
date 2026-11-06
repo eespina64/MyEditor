@@ -379,6 +379,8 @@ $extra"
 
 # ------------------------------------------------------------------ principal
 
+docker info >/dev/null 2>&1 || die "Docker no responde (¿está el servicio en marcha? systemctl status docker)"
+
 case "$MODE" in
   status) show_status; exit 0 ;;
   check)  do_check; exit 0 ;;
