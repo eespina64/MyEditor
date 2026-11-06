@@ -1,5 +1,7 @@
 # Manual Completo - Sistema Editorial EDITIA
 
+> **Aviso (2026-11-06):** para instalar, operar, actualizar y mantener EDITIA use [MANUAL-INSTALACION-OPERACION-MANTENIMIENTO.md](MANUAL-INSTALACION-OPERACION-MANTENIMIENTO.md). Esta guía contiene pasos y afirmaciones que ya no coinciden con el código (ver la sección 7 de ese manual).
+
 ## Tabla de Contenidos
 
 1. [Introducción](#introducción)
@@ -60,7 +62,7 @@ cd MyEditor
 bun install
 
 # Copiar variables de entorno
-cp .env.example .env.local
+cp config/env.template .env.local
 
 # Editar .env.local con sus valores
 nano .env.local

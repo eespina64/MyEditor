@@ -1,5 +1,7 @@
 # Guía de Despliegue en VPS - Sistema Editorial EDITIA
 
+> **Aviso (2026-11-06):** para instalar, operar, actualizar y mantener EDITIA use [MANUAL-INSTALACION-OPERACION-MANTENIMIENTO.md](MANUAL-INSTALACION-OPERACION-MANTENIMIENTO.md). Esta guía contiene pasos y afirmaciones que ya no coinciden con el código (ver la sección 7 de ese manual).
+
 ## Tabla de Contenidos
 
 1. [Requisitos del Servidor](#requisitos-del-servidor)
@@ -115,7 +117,7 @@ chmod +x scripts/*.sh
 
 ```bash
 # Copiar archivo de ejemplo
-cp .env.example .env
+cp config/env.template .env && chmod 600 .env
 
 # Editar configuración
 nano .env

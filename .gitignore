@@ -36,6 +36,15 @@ yarn-error.log*
 # vercel
 .vercel
 
+# servidor: copias de seguridad y estado de scripts/upgrade.sh
+/backups/
+/.upgrade/
+/nginx/ssl/
+/nginx/logs/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# servidor: ajustes locales de puertos (ver docs/GUIA-PUESTA-EN-MARCHA.md)
+/docker-compose.override.yml

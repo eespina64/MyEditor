@@ -55,4 +55,8 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# Commit desplegado; /api/health lo devuelve como "version"
+ARG GIT_SHA=unknown
+ENV APP_VERSION=$GIT_SHA
+
 CMD ["node", "server.js"]

@@ -99,6 +99,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     if: |
       (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
@@ -125,15 +128,17 @@ jobs:
           username: ${{ secrets.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          # Huella SHA256 de la clave del servidor; si el secreto está vacío no se verifica
+          fingerprint: ${{ secrets.VPS_FINGERPRINT }}
+          command_timeout: 30m
           script: |
-            cd /opt/editorial-workflow || exit 1
-            echo "📦 Pulling latest changes..."
-            git pull origin main
-            echo "🔨 Building and restarting..."
-            docker compose pull
-            docker compose up -d --build app
-            docker image prune -f
-            echo "✅ Done!"
+            set -eu
+            cd /opt/editorial-workflow
+            # Usa siempre la versión de upgrade.sh de la rama desplegada:
+            # copia de seguridad, construcción, comprobación de salud y vuelta atrás automática.
+            git fetch -q origin main
+            git show origin/main:scripts/upgrade.sh > /tmp/editia-upgrade.sh
+            bash /tmp/editia-upgrade.sh --dir /opt/editorial-workflow --branch main
             docker compose ps
 
       - name: Notify Success (Slack)
@@ -188,6 +193,8 @@ jobs:
           username: ${{ secrets.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          # Huella SHA256 de la clave del servidor; si el secreto está vacío no se verifica
+          fingerprint: ${{ secrets.VPS_FINGERPRINT }}
           script: |
             cd /opt/editorial-workflow
             BACKUP="backups/$(date +%Y%m%d_%H%M%S)"
@@ -198,7 +205,7 @@ jobs:
             cp .env "$BACKUP/.env" 2>/dev/null || true
             tar -czf "$BACKUP.tar.gz" -C backups "$(basename $BACKUP)"
             rm -rf "$BACKUP"
-            ls -t backups/*.tar.gz | tail -n +8 | xargs -r rm
+            ls -t backups/[0-9]*.tar.gz | tail -n +8 | xargs -r rm
             echo "✅ Backup: $BACKUP.tar.gz"
 
   # ============================================
@@ -219,6 +226,8 @@ jobs:
           username: ${{ secrets.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          # Huella SHA256 de la clave del servidor; si el secreto está vacío no se verifica
+          fingerprint: ${{ secrets.VPS_FINGERPRINT }}
           script: |
             cd /opt/editorial-workflow
             docker compose restart

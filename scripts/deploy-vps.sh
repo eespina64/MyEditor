@@ -38,14 +38,15 @@ check_docker() {
 # Check environment file
 check_env() {
     if [ ! -f ".env" ]; then
-        echo -e "${YELLOW}Archivo .env no encontrado. Creando desde .env.example...${NC}"
-        if [ -f ".env.example" ]; then
-            cp .env.example .env
+        echo -e "${YELLOW}Archivo .env no encontrado. Creando desde config/env.template...${NC}"
+        if [ -f "config/env.template" ]; then
+            cp config/env.template .env
+            chmod 600 .env
             echo -e "${GREEN}Archivo .env creado. Por favor, configure las variables antes de continuar.${NC}"
             echo -e "${YELLOW}Edite el archivo con: nano .env${NC}"
             exit 1
         else
-            echo -e "${RED}Error: .env.example no encontrado${NC}"
+            echo -e "${RED}Error: config/env.template no encontrado${NC}"
             exit 1
         fi
     fi

@@ -1,5 +1,7 @@
 # Guía de Despliegue - Sistema Editorial EDITIA
 
+> **Aviso (2026-11-06):** para instalar, operar, actualizar y mantener EDITIA use [MANUAL-INSTALACION-OPERACION-MANTENIMIENTO.md](MANUAL-INSTALACION-OPERACION-MANTENIMIENTO.md). Esta guía contiene pasos y afirmaciones que ya no coinciden con el código (ver la sección 7 de ese manual).
+
 ## Tabla de Contenidos
 
 1. [Requisitos](#requisitos)
@@ -34,7 +36,7 @@ cd editorial-workflow
 bun install
 
 # Configurar variables de entorno
-cp .env.example .env.local
+cp config/env.template .env.local
 # Editar .env.local con tus valores
 
 # Iniciar servidor de desarrollo
