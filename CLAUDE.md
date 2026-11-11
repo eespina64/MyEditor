@@ -28,3 +28,13 @@ Plazos y dudas abiertas de una tarea concreta van en `sources/task.md` o en `pro
 - Una preferencia descubierta en un borrador pasa a ser regla aquí solo cuando el usuario confirma que aplica a borradores futuros.
 - Cuando cambie un dato guardado, actualiza su fuente y su fecha de comprobación.
 - Los procedimientos ocasionales van en `.claude/skills/`, no en este archivo.
+
+## Harness
+
+- Tareas largas de código: contrato aprobado en `.claude/contracts/<tarea>.json` antes de escribir.
+- Trabaja dentro de `.agent_worktrees/<tarea>` (crear con `bash scripts/nueva-tarea.sh <tarea>`) y solo en `escritura_permitida`.
+- Criterio mínimo de aceptación: `bun run build` en código 0 (y `bun run lint` cuando toques tipos).
+- Nunca te autoapruebes. Para borradores, el revisor es el subagente `evidence-reviewer`; para código, una sesión o subagente distinto que intente romper el cambio.
+- Sin `.claude/receipts/recibo-<tarea>.json` con evidencia en 0 y veredicto APROBADO, no hay commit (el hook lo bloquea).
+- Un error corregido pasa a `.claude/rules/aprendizajes.md` cuando el usuario confirma que aplica a tareas futuras.
+- Guía completa: `.claude/HARNESS.md`.
