@@ -5,5 +5,18 @@
       "Read(.env.*)",
       "Edit(published/**)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-receipt.sh\""
+          }
+        ]
+      }
+    ]
   }
 }
